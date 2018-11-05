@@ -4,19 +4,18 @@
 
 extern crate std;
 extern crate eventfd;
-extern crate chrono;
+extern crate nix;
 
 use std::io;
 use std::fmt::Debug;
 use std::default::Default;
 use std::os::unix::io::AsRawFd;
 use std::sync::mpsc::Receiver;
+use std::time::Duration;
 use std::ptr;
 
-use self::chrono::duration::Duration;
-
 use super::Offset;
-use self::eventfd::EventFD;
+use self::eventfd::{EventFD, EfdFlags};
 use pool::Pool;
 
 #[allow(dead_code)]
@@ -105,9 +104,9 @@ fn as_ptr<T>(thing: Option<&T>) -> *const T {
 }
 
 fn timespec_from_duration(dur: Duration) -> aio::timespec {
-    let dur = std::cmp::max(Duration::zero(), dur); // -ve time is 0
+    let dur = std::cmp::max(Duration::new(0, 0), dur); // -ve time is 0
 
-    aio::timespec { tv_sec: dur.num_seconds(), tv_nsec: dur.num_nanoseconds().unwrap() % 1_000_000_000 }
+    aio::timespec { tv_sec: dur.as_secs() as i64, tv_nsec: dur.subsec_nanos() as i64}
 }
 
 
@@ -134,9 +133,9 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
 
     // XXX how to make crate-local?
     #[doc(hidden)]
-    pub fn get_evfd_stream(&mut self) -> io::Result<Receiver<u64>> {
+    pub fn get_evfd_stream(&mut self) -> Result<Receiver<u64>, nix::Error> {
         if self.evfd.is_none() {
-            match EventFD::new(0, 0) {
+            match EventFD::new(0, EfdFlags::empty()) {
                 Err(e) => return Err(e),
                 Ok(evfd) => self.evfd = Some(evfd),
             }
@@ -149,7 +148,7 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
     /// Submit all outstanding IO operations. Returns number of submitted operations.
     pub fn submit(&mut self) -> io::Result<usize> {
         // Get the current batch and clear out the new one
-        let mut iocbp = self.batch.batch();
+        let iocbp = self.batch.batch();
 
         if iocbp.len() == 0 {
             Ok(0)
@@ -269,7 +268,7 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
         } else {
             let mut iov : Vec<_> = (0..buf.len())
                 .map(|b| aio::Struct_iovec { iov_base: buf[b].rdbuf().as_mut_ptr(),
-                                             iov_len: buf[b].rdbuf().len() as u64 })
+                                             iov_len: buf[b].rdbuf().len() })
                 .collect();
                 
             let iocb = Iocb {
@@ -312,7 +311,7 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
         } else {
             let iov : Vec<_> = (0..bufv.len())
                 .map(|b| aio::Struct_iovec { iov_base: bufv[b].wrbuf().as_ptr() as *mut u8,
-                                             iov_len: bufv[b].wrbuf().len() as u64 })
+                                             iov_len: bufv[b].wrbuf().len() })
                 .collect();
 
             let iocb = Iocb {
@@ -426,15 +425,14 @@ impl<T, Wb : WrBuf, Rb : RdBuf> Iobatch<T, Wb, Rb> {
 mod test {
     extern crate std;
     extern crate tempdir;
-    extern crate chrono;
     
-    use super::chrono::duration::Duration;
     use super::{Iocontext,Iobatch,Iocb,IoOp};
     use super::super::aioabi as aio;
     use std::default::Default;
     use std::cmp::min;
     use std::fs::{File,OpenOptions};
     use std::iter;
+    use std::time::Duration;
     use self::tempdir::TempDir;
     
     #[test]
@@ -503,7 +501,7 @@ mod test {
                 Ok(n) => assert_eq!(n, io.submitted())
             }
 
-            match io.results(1, 10, Some(Duration::seconds(1))) {
+            match io.results(1, 10, Some(Duration::from_secs(1))) {
                 Err(e) => println!("results failed {:?}", e),
                 Ok(res) => for &(ref op, ref r) in res.iter() {
                     match r {
@@ -543,7 +541,7 @@ mod test {
                 Ok(n) => assert_eq!(n, io.submitted())
             }
 
-            match io.results(1, 10, Some(Duration::seconds(1))) {
+            match io.results(1, 10, Some(Duration::from_secs(1))) {
                 Err(e) => println!("results failed {:?}", e),
                 Ok(res) => for &(ref op, ref r) in res.iter() {
                     match r {

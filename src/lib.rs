@@ -1,5 +1,3 @@
-#![feature(convert)]
-#![feature(heap_api)]
 
 extern crate libc;
 

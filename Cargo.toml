@@ -1,16 +1,16 @@
 [package]
 
 name = "libaio"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Jeremy Fitzhardinge <jeremy@goop.org>"]
 description = "Binding to Linux's async block IO syscalls and libaio"
 readme = "README.md"
 license = "MIT"
 
 [dependencies]
-eventfd="*"
+eventfd= { path = "../eventfd-rust" }
+nix = "0.11"
 libc="*"
-chrono = "*"
 
 [dev-dependencies]
 tempdir = "*"

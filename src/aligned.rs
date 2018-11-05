@@ -1,5 +1,5 @@
 //! Aligned memory buffers for Direct IO.
-use std::rt::heap;
+use std::alloc;
 use std::ptr;
 use std::slice;
 
@@ -23,11 +23,7 @@ fn ispower2(n: usize) -> bool {
 }
 
 unsafe fn realloc(ptr: *mut u8, oldsz: usize, sz: usize, align: usize) -> *mut u8 {
-    if heap::reallocate_inplace(ptr, oldsz, sz, align) >= sz {
-        ptr
-    } else {
-        heap::reallocate(ptr, oldsz, sz, align)
-    }
+    alloc::realloc(ptr, alloc::Layout::from_size_align(oldsz, align).unwrap(), sz)
 }
 
 impl AlignedBuf {
@@ -43,7 +39,7 @@ impl AlignedBuf {
         let sz = (size + align - 1) & !(align - 1);
         assert!(sz >= size);
         assert!(sz % align == 0);
-        let p = heap::allocate(sz, align);
+        let p = alloc::alloc(alloc::Layout::from_size_align(sz, align).unwrap());
 
         if p.is_null() {
             None
@@ -159,7 +155,7 @@ impl AlignedBuf {
 
 impl Drop for AlignedBuf {
     fn drop(&mut self) {
-        unsafe { heap::deallocate(self.buf, self.len, self.align) }
+        unsafe { alloc::dealloc(self.buf, alloc::Layout::from_size_align(self.len, self.align).unwrap()) }
     }
 }
 
