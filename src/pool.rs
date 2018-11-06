@@ -43,12 +43,13 @@ impl<T> Pool<T> {
     /// Free an index in the pool
     pub fn freeidx(&mut self, idx: usize) -> T {
         assert!(idx < self.pool.len());
-        self.freelist = idx as isize;
-        self.used -= 1;
-        match std::mem::replace(&mut self.pool[idx], Slot::Free(self.freelist)) {
+        let res = match std::mem::replace(&mut self.pool[idx], Slot::Free(self.freelist)) {
             Slot::Alloc(v) => v,
             Slot::Free(_) => panic!("Freeing free entry {}", idx)
-        }
+        };
+        self.freelist = idx as isize;
+        self.used -= 1;
+        res
     }
 
     /// Allow an entry to be freed from a raw pointer. Inherently unsafe.
