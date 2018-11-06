@@ -86,6 +86,9 @@ pub enum IoOp<T, Wb : WrBuf, Rb : RdBuf> {
     /// disk, but not necessarily metadata (timestamps, etc). Only
     /// works on some filesystems.
     Fdsync(T),                  // fdatasync
+
+    PreadvRaw(T),
+    PwritevRaw(T),
 }
 
 fn as_mut_ptr<T>(thing: Option<&mut T>) -> *mut T {
@@ -129,6 +132,10 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
         } else {
             Ok(r)
         }
+    }
+
+    pub fn set_evfd(&mut self, evfd: EventFD) {
+        self.evfd = Some(evfd);
     }
 
     // XXX how to make crate-local?
@@ -261,6 +268,31 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
         }
     }
         
+    /// Queue up a preadv operation using raw pointer to designate output buffers
+    pub fn preadv_raw<F: AsRawFd>(
+        &mut self,
+        file: &F,
+        iov: &Vec<aio::Struct_iovec>,
+        off: Offset,
+        tok: T
+    ) -> Result<(), T>
+    {
+        if self.full() {
+            Err(tok)
+        } else {
+            let iocb = Iocb {
+                iocb: aio::Struct_iocb {
+                    aio_buf: iov.as_ptr() as u64,
+                    aio_count: iov.len() as u64,
+
+                    .. self.pack_iocb(aio::Iocmd::IO_CMD_PREADV, file, off)
+                },
+                op: IoOp::PreadvRaw(tok),
+            };
+            self.prep_iocb(iocb)
+        }
+    }
+
     /// Queue up a preadv operation.
     pub fn preadv<F: AsRawFd>(&mut self, file: &F, mut buf: Vec<Rb>, off: Offset, tok: T) -> Result<(), (Vec<Rb>, T)> {
         if self.full() {
@@ -304,6 +336,31 @@ impl<T: Send, Wb : WrBuf + Send, Rb : RdBuf + Send> Iocontext<T, Wb, Rb> {
         }
     }
 
+    /// Queue up a pwritev operation using raw pointer to designate input buffers
+    pub fn pwritev_raw<F: AsRawFd>(
+        &mut self,
+        file: &F,
+        iov: &Vec<aio::Struct_iovec>,
+        off: Offset,
+        tok: T
+    ) -> Result<(), T>
+    {
+        if self.full() {
+            Err(tok)
+        } else {
+            let iocb = Iocb {
+                iocb: aio::Struct_iocb {
+                    aio_buf: iov.as_ptr() as u64,
+                    aio_count: iov.len() as u64,
+
+                    .. self.pack_iocb(aio::Iocmd::IO_CMD_PWRITEV, file, off)
+                },
+                op: IoOp::PwritevRaw(tok),
+            };
+            self.prep_iocb(iocb)
+        }
+    }
+        
     /// Queue up a pwritev operation.
     pub fn pwritev<F: AsRawFd>(&mut self, file: &F, bufv: Vec<Wb>, off: Offset, tok: T) -> Result<(), (Vec<Wb>, T)> {
         if self.full() {
@@ -374,6 +431,8 @@ impl<T : Debug, Wb : WrBuf, Rb : RdBuf> Debug for IoOp<T, Wb, Rb> {
             &IoOp::Pwritev(_, ref t) => write!(fmt, "Pwritev {:?}", t),
             &IoOp::Fsync(ref t) => write!(fmt, "Fsync {:?}", t),
             &IoOp::Fdsync(ref t) => write!(fmt, "Fdsync {:?}", t),
+            &IoOp::PreadvRaw(ref t) => write!(fmt, "PreadvRaw {:?}", t),
+            &IoOp::PwritevRaw(ref t) => write!(fmt, "PwritevRaw {:?}", t),
         }
     }
 }
